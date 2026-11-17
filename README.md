@@ -65,9 +65,12 @@ Stripe to the local Quarkus endpoint.
 ``` text
 Stripe -> Stripe CLI -> http://localhost:8080/api/payments/webhook
 ```
+```stripe listen \
+>   --events checkout.session.completed,checkout.session.expired,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed \
+>   --forward-to localhost:8080/api/payments/webhook
+```
 
 ### Component responsibilities
-
   -----------------------------------------------------------------------
 Component                           Responsibility
   ----------------------------------- -----------------------------------

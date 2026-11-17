@@ -29,6 +29,7 @@ public class StripeWebhookResource {
                     signature,
                     webhookSecret
             );
+            System.out.println(event.getType());
 
             switch (event.getType()) {
 

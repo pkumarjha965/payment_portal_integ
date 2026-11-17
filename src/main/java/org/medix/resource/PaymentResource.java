@@ -4,22 +4,28 @@ import com.stripe.StripeClient;
 import com.stripe.model.checkout.Session;
 import com.stripe.param.checkout.SessionCreateParams;
 
-import jakarta.resource.spi.ConfigProperty;
+import jakarta.inject.Inject;
+
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+
 import java.util.Map;
 
 @Path("/api/payments")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class PaymentResource {
-    
+
+    @Inject
+    @ConfigProperty(name="stripe.secret-key")
+    String apiKey;
 
     @POST
     @Path("/checkout")
     public Map<String, String> createCheckout() throws Exception {
 
-        StripeClient client = new StripeClient("");
+        StripeClient client = new StripeClient(apiKey);
 
 
         SessionCreateParams params =
@@ -27,8 +33,11 @@ public class PaymentResource {
                         .setMode(SessionCreateParams.Mode.PAYMENT)
 
                         .setSuccessUrl(
-                                "http://localhost:5173/payment/success" +
+                                "http://localhost:5173/payment/loading" +
                                         "?session_id={CHECKOUT_SESSION_ID}"
+                                // Order - page ; Loader
+                                // polling
+                                // Redirect order confirmation page
                         )
 
                         .setCancelUrl(
