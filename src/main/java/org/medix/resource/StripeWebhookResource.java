@@ -1,20 +1,24 @@
 package org.medix.resource;
 
-import com.stripe.model.Event;
-import com.stripe.model.checkout.Session;
-import com.stripe.net.Webhook;
-
-import jakarta.ws.rs.*;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.HeaderParam;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.jboss.logging.Logger;
+import org.medix.service.PaymentService;
 
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import java.util.Map;
 
 @Path("/api/payments/webhook")
 public class StripeWebhookResource {
 
-    @ConfigProperty(name = "stripe.webhook-secret")
-    String webhookSecret;
+    private static final Logger LOG = Logger.getLogger(StripeWebhookResource.class);
+
+    @Inject
+    PaymentService paymentService;
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
@@ -23,56 +27,13 @@ public class StripeWebhookResource {
             @HeaderParam("Stripe-Signature") String signature) {
 
         try {
-
-            Event event = Webhook.constructEvent(
-                    payload,
-                    signature,
-                    webhookSecret
-            );
-            System.out.println(event.getType());
-
-            switch (event.getType()) {
-
-                case "checkout.session.completed":
-
-                    Session session = (Session) event
-                            .getDataObjectDeserializer()
-                            .getObject()
-                            .orElseThrow();
-
-                    System.out.println(
-                            "Payment completed: " + session.getId()
-                    );
-
-                    System.out.println(
-                            "Payment details: " + session.toJson()
-                    );
-
-                    // TODO:
-                    // Retrieve internal order reference
-                    // Update payment status to PAID
-
-                    break;
-
-                case "checkout.session.expired":
-
-                    System.out.println("Checkout session expired");
-
-                    break;
-
-                default:
-
-                    System.out.println(
-                            "Unhandled event: " + event.getType()
-                    );
-            }
-
-            return Response.ok().build();
-
+            paymentService.processWebhook(payload, signature);
+            return Response.ok(Map.of("received", true)).build();
         } catch (Exception e) {
-
-            return Response.status(400).build();
-
+            LOG.errorf("Error processing Stripe webhook: %s", e.getMessage());
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", e.getMessage() != null ? e.getMessage() : "Webhook verification failed"))
+                    .build();
         }
     }
 }
