@@ -38,10 +38,10 @@ application does not collect or store card numbers or CVVs.
 |                     | ----------------------------> |                      |
 |    React frontend   |                               |    Quarkus backend   |
 |    localhost:5173   | <---------------------------- |    localhost:8080    |
-|                     |       2. Checkout URL         |                      |
+|                     |       3. Checkout URL         |                      |
 +---------------------+                               +----------+-----------+
           |                                                       |
-          | 3. Redirect browser                                   | 4. Create
+          | 4. Redirect browser                                   | 2. Create
           v                                                       |    Checkout
 +---------------------+                                           |    Session
 |                     |                                           v
