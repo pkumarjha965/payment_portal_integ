@@ -13,6 +13,7 @@ import org.jboss.logging.Logger;
 import org.medix.dto.CheckoutSessionRequest;
 import org.medix.dto.PaymentStatusResponse;
 import org.medix.dto.PaymentValidationResponse;
+import org.medix.dto.shipping.CreateShipmentRequest;
 import org.medix.model.PaymentRecord;
 import org.medix.repository.PaymentRepository;
 
@@ -41,6 +42,9 @@ public class PaymentService {
     @Inject
     PaymentRepository paymentRepository;
 
+    @Inject
+    ShippingService shippingService;
+
     public Map<String, Object> createCheckout(CheckoutSessionRequest request) throws Exception {
         StripeClient client = new StripeClient(apiKey);
 
@@ -68,30 +72,34 @@ public class PaymentService {
                 ? request.cancelUrl()
                 : frontendUrl + "/payment/cancel";
 
-        SessionCreateParams params = SessionCreateParams.builder()
+        SessionCreateParams.Builder paramsBuilder = SessionCreateParams.builder()
                 .setMode(SessionCreateParams.Mode.PAYMENT)
                 .setSuccessUrl(successUrl)
                 .setCancelUrl(cancelUrl)
-                .putMetadata("orderId", orderId)
-                .addLineItem(
-                        SessionCreateParams.LineItem.builder()
-                                .setQuantity(1L)
-                                .setPriceData(
-                                        SessionCreateParams.LineItem.PriceData.builder()
-                                                .setCurrency(currency)
-                                                .setUnitAmount(amount)
-                                                .setProductData(
-                                                        SessionCreateParams.LineItem.PriceData.ProductData.builder()
-                                                                .setName(productName)
-                                                                .build()
-                                                )
-                                                .build()
-                                )
-                                .build()
-                )
-                .build();
+                .putMetadata("orderId", orderId);
 
-        Session session = client.v1().checkout().sessions().create(params);
+        if (request != null && request.shippingMethod() != null) {
+            paramsBuilder.putMetadata("shippingMethod", request.shippingMethod());
+        }
+
+        paramsBuilder.addLineItem(
+                SessionCreateParams.LineItem.builder()
+                        .setQuantity(1L)
+                        .setPriceData(
+                                SessionCreateParams.LineItem.PriceData.builder()
+                                        .setCurrency(currency)
+                                        .setUnitAmount(amount)
+                                        .setProductData(
+                                                SessionCreateParams.LineItem.PriceData.ProductData.builder()
+                                                        .setName(productName)
+                                                        .build()
+                                        )
+                                        .build()
+                        )
+                        .build()
+        );
+
+        Session session = client.v1().checkout().sessions().create(paramsBuilder.build());
 
         // Record initial payment state in database as PENDING
         PaymentRecord initialRecord = new PaymentRecord(
@@ -108,6 +116,17 @@ public class PaymentService {
                 Instant.now()
         );
         paymentRepository.saveOrUpdate(initialRecord);
+
+        // If shipping address was provided at checkout initiation, register initial shipment
+        if (request != null && request.shippingAddress() != null) {
+            shippingService.createShipment(new CreateShipmentRequest(
+                    orderId,
+                    session.getId(),
+                    request.shippingMethod() != null ? request.shippingMethod() : "standard",
+                    request.shippingAddress(),
+                    productName
+            ));
+        }
 
         Map<String, Object> response = new HashMap<>();
         response.put("sessionId", session.getId());
@@ -152,6 +171,11 @@ public class PaymentService {
                 );
                 paymentRepository.saveOrUpdate(record);
                 LOG.infof("Webhook: Updated payment %s to status %s", session.getId(), status);
+
+                if ("PAID".equals(status)) {
+                    String method = session.getMetadata() != null ? session.getMetadata().get("shippingMethod") : "standard";
+                    shippingService.autoCreateShipmentIfMissing(orderId, session.getId(), customerEmail, method, null);
+                }
                 break;
 
             case "checkout.session.expired":
@@ -212,6 +236,7 @@ public class PaymentService {
         if (existingOpt.isPresent()) {
             PaymentRecord existing = existingOpt.get();
             if ("PAID".equalsIgnoreCase(existing.getStatus()) || "SUCCESS".equalsIgnoreCase(existing.getStatus())) {
+                shippingService.autoCreateShipmentIfMissing(existing.getOrderId(), existing.getSessionId(), existing.getCustomerEmail(), "standard", null);
                 return new PaymentValidationResponse(
                         paymentId,
                         "PAID",
@@ -234,6 +259,9 @@ public class PaymentService {
                 String status = isPaid ? "PAID" : piStatus.toUpperCase();
 
                 paymentRepository.updateStatus(paymentId, status);
+                if (isPaid) {
+                    shippingService.autoCreateShipmentIfMissing(null, paymentId, pi.getReceiptEmail(), "standard", null);
+                }
                 return new PaymentValidationResponse(
                         paymentId,
                         status,
@@ -266,6 +294,11 @@ public class PaymentService {
                         Instant.now()
                 );
                 paymentRepository.saveOrUpdate(updatedRecord);
+
+                if (isPaid) {
+                    String method = session.getMetadata() != null ? session.getMetadata().get("shippingMethod") : "standard";
+                    shippingService.autoCreateShipmentIfMissing(orderId, session.getId(), customerEmail, method, null);
+                }
 
                 return new PaymentValidationResponse(
                         paymentId,
